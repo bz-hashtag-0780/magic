@@ -43,9 +43,41 @@ const SendTransaction = () => {
 			setTransactionLoading(true);
 
 			const response = await fcl.mutate({
-				//cadence: transaction,
-				template:
-					'https://flix.flow.com/v1/templates?name=transfer-flow',
+				cadence: `
+				import FungibleToken from 0xf233dcee88fe0abe
+import FlowToken from 0x1654653399040a61
+
+transaction(amount: UFix64, to: Address) {
+
+    // The Vault resource that holds the tokens that are being transferred
+    let sentVault: @{FungibleToken.Vault}
+
+    prepare(signer: auth(BorrowValue) &Account) {
+
+        // Get a reference to the signer's stored FlowToken vault
+        let vaultRef = signer.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
+            ?? panic("The signer does not store a FlowToken.Vault object at the path /storage/flowTokenVault. The signer must initialize their account with this vault first!")
+
+        // Withdraw tokens from the signer's stored vault
+        self.sentVault <- vaultRef.withdraw(amount: amount)
+    }
+
+    execute {
+
+        // Get the recipient's public account object
+        let recipient = getAccount(to)
+
+        // Get a reference to the recipient's Receiver
+        let receiverRef = recipient.capabilities.borrow<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
+            ?? panic("Could not borrow a Receiver reference to the FlowToken Vault in account "
+                .concat(to.toString()).concat(" at path /public/flowTokenReceiver. Make sure you are sending to an address that has a FlowToken Vault set up properly at the specified path."))
+
+        // Deposit the withdrawn tokens in the recipient's receiver
+        receiverRef.deposit(from: <-self.sentVault)
+    }
+}
+
+				`,
 				args: (arg: any, t: any) => [
 					arg(Number(amount).toFixed(2), t.UFix64),
 					arg(toAddress, t.Address),
